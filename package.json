@@ -1,5 +1,6 @@
 {
   "name": "metaverse",
+  "packageManager": "pnpm@8.15.6",
   "private": true,
   "scripts": {
     "build": "turbo build",
@@ -12,7 +13,7 @@
     "turbo": "^2.2.3",
     "typescript": "5.5.4"
   },
-  "packageManager": "pnpm@8.15.6",
+  
   "engines": {
     "node": ">=18"
   }
