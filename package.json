@@ -1,6 +1,6 @@
 {
   "name": "metaverse",
-  "packageManager": "pnpm@8.15.6",
+  "packageManager": "pnpm@10.34.5",
   "private": true,
   "scripts": {
     "build": "turbo build",
