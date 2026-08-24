@@ -2,21 +2,24 @@ import express from "express";
 import { router } from "./routes/v1";
 
 const app = express();
-
 /* =========================
    CORS
 ========================= */
 
 app.use((req, res, next) => {
   const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://meta-verse-game-frontend-ibvw-mfbc98d00-sdeepanshu7s-projects.vercel.app",
-];
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://meta-verse-game-frontend-ibvw.vercel.app",
+  ];
 
   const origin = req.headers.origin;
 
-  if (origin && allowedOrigins.includes(origin)) {
+  if (
+    origin &&
+    (allowedOrigins.includes(origin) ||
+      origin.endsWith("-sdeepanshu7s-projects.vercel.app"))
+  ) {
     res.header("Access-Control-Allow-Origin", origin);
   }
 
