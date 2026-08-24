@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-   "build": "npx esbuild src/index.ts --bundle --outfile=dist/index.js --platform=node --tsconfig=tsconfig.json --external:@prisma/client --external:.prisma/client/*",
+    "build": "npx esbuild src/index.ts --bundle --outfile=dist/index.js --platform=node --tsconfig=tsconfig.json --external:@prisma/client --external:.prisma/client/*",
     "start": "node dist/index.js",
     "dev": "npm run build && npm run start"
   },
@@ -12,6 +12,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@prisma/client": "5.22.0",
     "@repo/db": "workspace:*",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/ws": "^8.5.12",
