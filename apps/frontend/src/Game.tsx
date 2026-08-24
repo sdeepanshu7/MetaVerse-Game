@@ -49,6 +49,17 @@ const SPACE_ID =
   import.meta.env.VITE_SPACE_ID ||
   "cmt5wunma0002g3y4ptssvuu3";
 
+/*
+ * WebSocket URL
+ *
+ * Local development:
+ *   ws://localhost:3001
+ *
+ * Production:
+ *   VITE_WS_URL is provided by Vercel
+ *   and should contain:
+ *   wss://metaverse-ws-349c.onrender.com
+ */
 const WS_URL =
   import.meta.env.VITE_WS_URL ||
   "ws://localhost:3001";
@@ -226,158 +237,107 @@ const PROPS: Prop[] = [
   },
 
   {
-    type: "rug",
-    x: 1,
-    y: 4,
-    w: 5,
-    h: 5,
-  },
-
-  {
     type: "table",
-    x: 2,
-    y: 6,
-    w: 3,
-    h: 3,
-  },
-
-  {
-    type: "sofa",
-    x: 1,
-    y: 11,
-    w: 4,
+    x: 12,
+    y: 9,
+    w: 5,
     h: 2,
   },
 
   {
-    type: "plant",
-    x: 6,
-    y: 13,
+    type: "table",
+    x: 23,
+    y: 9,
+    w: 5,
+    h: 2,
+  },
+
+  {
+    type: "sofa",
+    x: 12,
+    y: 12,
+    w: 6,
+    h: 2,
+  },
+
+  {
+    type: "sofa",
+    x: 22,
+    y: 12,
+    w: 6,
+    h: 2,
+  },
+
+  {
+    type: "rug",
+    x: 18,
+    y: 8,
+    w: 4,
+    h: 5,
   },
 
   {
     type: "painting",
     x: 2,
     y: 4,
-    w: 3,
-    h: 1,
-  },
-
-  {
-    type: "bookshelf",
-    x: 31,
-    y: 4,
-    w: 2,
+    w: 5,
     h: 4,
   },
 
   {
-    type: "bookshelf",
-    x: 37,
-    y: 4,
-    w: 2,
-    h: 4,
-  },
-
-  {
-    type: "sofa",
+    type: "painting",
     x: 33,
-    y: 12,
-    w: 4,
-    h: 2,
-  },
-
-  {
-    type: "plant",
-    x: 31,
-    y: 13,
-  },
-
-  {
-    type: "plant",
-    x: 37,
-    y: 9,
+    y: 4,
+    w: 5,
+    h: 4,
   },
 ];
-
-const ZONE_LABELS = [
-  {
-    text: "Sleeping Room",
-    x: 20,
-    y: 8,
-    arrow: "up" as const,
-  },
-  {
-    text: "Personal Desk",
-    x: 20,
-    y: 15,
-    arrow: "down" as const,
-  },
-];
-
-const AVATAR_COLORS = [
-  "#8b5cf6",
-  "#06b6d4",
-  "#f2a13c",
-  "#e07a5f",
-  "#81b29a",
-  "#8ab6d6",
-];
-
-function colorForId(id: string) {
-  let hash = 0;
-
-  for (let i = 0; i < id.length; i++) {
-    hash =
-      (hash * 31 + id.charCodeAt(i)) >>> 0;
-  }
-
-  return AVATAR_COLORS[
-    hash % AVATAR_COLORS.length
-  ];
-}
 
 /* =========================================================
-   ARENA
+   COMPONENT
 ========================================================= */
 
-const Arena = ({
+export default function Game({
   onAuthError,
   onLogout,
-}: ArenaProps) => {
+}: ArenaProps) {
   const canvasRef =
     useRef<HTMLCanvasElement | null>(null);
 
   const wsRef =
     useRef<WebSocket | null>(null);
 
+  const keysRef =
+    useRef<Set<string>>(new Set());
+
+  const animationRef =
+    useRef<number | null>(null);
+
   const bubbleTimeout =
     useRef<ReturnType<typeof setTimeout> | null>(
       null
     );
 
-  const chatIdRef =
-    useRef(0);
+  const [connected, setConnected] =
+    useState(false);
+
+  const [users, setUsers] =
+    useState<User[]>([]);
 
   const [currentUser, setCurrentUser] =
     useState<CurrentUser | null>(null);
 
-  const [users, setUsers] =
-    useState<Map<string, User>>(
-      new Map()
-    );
-
-  const [connected, setConnected] =
-    useState(false);
-
-  const [chatLog, setChatLog] =
+  const [messages, setMessages] =
     useState<ChatMessage[]>([]);
 
-  const [chatDraft, setChatDraft] =
+  const [messageInput, setMessageInput] =
     useState("");
 
-  const [bubble, setBubble] =
-    useState<string | null>(null);
+  const [chatBubble, setChatBubble] =
+    useState<{
+      username: string;
+      text: string;
+    } | null>(null);
 
   const [error, setError] =
     useState<string | null>(null);
@@ -407,6 +367,24 @@ const Arena = ({
 
       return;
     }
+
+    /*
+     * IMPORTANT:
+     *
+     * On Vercel:
+     *
+     * VITE_WS_URL =
+     * https://? NO
+     *
+     * wss://metaverse-ws-349c.onrender.com
+     *
+     * WebSocket connections from an HTTPS website
+     * should use WSS.
+     *
+     * During local development the fallback remains:
+     *
+     * ws://localhost:3001
+     */
 
     console.log(
       "Connecting to:",
@@ -490,6 +468,7 @@ const Arena = ({
 
     return () => {
       ws.close();
+
       wsRef.current = null;
 
       if (bubbleTimeout.current) {
@@ -508,263 +487,192 @@ const Arena = ({
     message: any
   ) => {
     switch (message.type) {
-      /* ---------------------------------------------------
-         SUCCESSFUL JOIN
-      --------------------------------------------------- */
-
       case "space-joined": {
-        const payload =
-          message.payload;
+        const user =
+          message.payload?.user;
 
-        if (!payload) {
-          return;
+        if (user) {
+          setCurrentUser({
+            x: user.x,
+            y: user.y,
+            userId: user.userId,
+          });
         }
 
-        setCurrentUser({
-          x: payload.spawn?.x ?? 10,
-          y: payload.spawn?.y ?? 10,
-          userId: payload.userId,
-        });
+        const existingUsers =
+          message.payload?.users ||
+          [];
 
-        const userMap =
-          new Map<string, User>();
-
-        if (Array.isArray(payload.users)) {
-          payload.users.forEach(
-            (user: User) => {
-              /*
-               * Don't put ourselves in the
-               * "other players" map.
-               */
-              if (
-                user.userId !==
-                payload.userId
-              ) {
-                userMap.set(
-                  user.userId,
-                  user
-                );
-              }
-            }
-          );
-        }
-
-        setUsers(userMap);
+        setUsers(existingUsers);
 
         break;
       }
-
-      /* ---------------------------------------------------
-         PLAYER JOINED
-      --------------------------------------------------- */
 
       case "user-joined": {
         const user =
-          message.payload;
+          message.payload?.user;
 
-        if (!user?.userId) {
-          return;
+        if (!user) {
+          break;
         }
 
-        setUsers((previous) => {
-          const next =
-            new Map(previous);
+        setUsers((prev) => {
+          const exists =
+            prev.some(
+              (item) =>
+                item.userId ===
+                user.userId
+            );
 
-          next.set(
-            user.userId,
-            {
-              x: user.x,
-              y: user.y,
-              userId: user.userId,
-              username:
-                user.username,
-            }
-          );
+          if (exists) {
+            return prev;
+          }
 
-          return next;
+          return [
+            ...prev,
+            user,
+          ];
         });
 
         break;
       }
-
-      /* ---------------------------------------------------
-         PLAYER MOVEMENT
-      --------------------------------------------------- */
-
-      case "movement": {
-        const payload =
-          message.payload;
-
-        if (!payload?.userId) {
-          return;
-        }
-
-        setUsers((previous) => {
-          const next =
-            new Map(previous);
-
-          const existing =
-            next.get(
-              payload.userId
-            );
-
-          if (existing) {
-            next.set(
-              payload.userId,
-              {
-                ...existing,
-                x: payload.x,
-                y: payload.y,
-              }
-            );
-          } else {
-            /*
-             * Handles a movement message
-             * arriving before user-joined.
-             */
-            next.set(
-              payload.userId,
-              {
-                x: payload.x,
-                y: payload.y,
-                userId:
-                  payload.userId,
-              }
-            );
-          }
-
-          return next;
-        });
-
-        break;
-      }
-
-      /* ---------------------------------------------------
-         MOVEMENT REJECTED
-      --------------------------------------------------- */
-
-      case "movement-rejected": {
-        const payload =
-          message.payload;
-
-        if (!payload) {
-          return;
-        }
-
-        setCurrentUser(
-          (previous) => {
-            if (!previous) {
-              return previous;
-            }
-
-            return {
-              ...previous,
-              x: payload.x,
-              y: payload.y,
-            };
-          }
-        );
-
-        break;
-      }
-
-      /* ---------------------------------------------------
-         PLAYER LEFT
-      --------------------------------------------------- */
 
       case "user-left": {
         const userId =
           message.payload?.userId;
 
         if (!userId) {
-          return;
+          break;
         }
 
-        setUsers((previous) => {
-          const next =
-            new Map(previous);
-
-          next.delete(userId);
-
-          return next;
-        });
+        setUsers((prev) =>
+          prev.filter(
+            (user) =>
+              user.userId !==
+              userId
+          )
+        );
 
         break;
       }
 
-      /* ---------------------------------------------------
-         CHAT
-      --------------------------------------------------- */
+      case "movement": {
+        const user =
+          message.payload?.user;
+
+        if (!user) {
+          break;
+        }
+
+        setUsers((prev) =>
+          prev.map((item) =>
+            item.userId ===
+            user.userId
+              ? {
+                  ...item,
+                  x: user.x,
+                  y: user.y,
+                }
+              : item
+          )
+        );
+
+        if (
+          currentUser &&
+          user.userId ===
+            currentUser.userId
+        ) {
+          setCurrentUser({
+            x: user.x,
+            y: user.y,
+            userId:
+              user.userId,
+          });
+        }
+
+        break;
+      }
 
       case "chat": {
-        const payload =
+        const chat =
           message.payload;
 
-        if (!payload?.text) {
-          return;
+        if (!chat) {
+          break;
         }
 
-        setChatLog(
-          (previous) => [
-            ...previous,
-            {
-              id:
-                chatIdRef.current++,
-              name:
-                payload.name ||
-                payload.username ||
-                `Player ${String(
-                  payload.userId
-                ).slice(0, 6)}`,
-              text:
-                payload.text,
-            },
-          ]
-        );
+        const newMessage: ChatMessage = {
+          id: Date.now(),
+          name:
+            chat.username ||
+            "Player",
+          text:
+            chat.message ||
+            "",
+        };
+
+        setMessages((prev) => [
+          ...prev,
+          newMessage,
+        ]);
+
+        setChatBubble({
+          username:
+            chat.username ||
+            "Player",
+          text:
+            chat.message ||
+            "",
+        });
+
+        if (bubbleTimeout.current) {
+          clearTimeout(
+            bubbleTimeout.current
+          );
+        }
+
+        bubbleTimeout.current =
+          setTimeout(() => {
+            setChatBubble(null);
+          }, 4000);
 
         break;
       }
 
-      /* ---------------------------------------------------
-         AUTH ERROR
-      --------------------------------------------------- */
-
-      case "unauthorized":
-      case "auth-error":
-      case "invalid-token": {
-        localStorage.removeItem(
-          "token"
+      case "error": {
+        console.error(
+          "WebSocket server error:",
+          message
         );
 
-        localStorage.removeItem(
-          "username"
-        );
-
-        setConnected(false);
-
-        onAuthError();
+        if (
+          message.payload?.message
+        ) {
+          setError(
+            message.payload.message
+          );
+        }
 
         break;
       }
 
-      default: {
+      default:
         console.log(
           "Unknown WebSocket message:",
           message
         );
-      }
     }
   };
 
   /* =======================================================
-     MOVEMENT
+     SEND CHAT
   ======================================================= */
 
-  const handleMove = (
-    newX: number,
-    newY: number
-  ) => {
-    if (!currentUser) {
+  const sendMessage = () => {
+    const message =
+      messageInput.trim();
+
+    if (!message) {
       return;
     }
 
@@ -776,21 +684,23 @@ const Arena = ({
       ws.readyState !==
         WebSocket.OPEN
     ) {
+      setError(
+        "You are not connected to the game server."
+      );
+
       return;
     }
 
     ws.send(
       JSON.stringify({
-        type: "move",
-
+        type: "chat",
         payload: {
-          x: newX,
-          y: newY,
-          userId:
-            currentUser.userId,
+          message,
         },
       })
     );
+
+    setMessageInput("");
   };
 
   /* =======================================================
@@ -801,57 +711,32 @@ const Arena = ({
     const handleKeyDown = (
       event: KeyboardEvent
     ) => {
-      if (!currentUser) {
-        return;
-      }
+      const key =
+        event.key.toLowerCase();
 
-      const target =
-        event.target as HTMLElement | null;
-
-      /*
-       * Don't move while typing.
-       */
       if (
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA"
+        [
+          "w",
+          "a",
+          "s",
+          "d",
+          "arrowup",
+          "arrowdown",
+          "arrowleft",
+          "arrowright",
+        ].includes(key)
       ) {
-        return;
+        keysRef.current.add(key);
       }
+    };
 
-      const {
-        x,
-        y,
-      } = currentUser;
+    const handleKeyUp = (
+      event: KeyboardEvent
+    ) => {
+      const key =
+        event.key.toLowerCase();
 
-      switch (event.key) {
-        case "ArrowUp":
-        case "w":
-        case "W":
-          event.preventDefault();
-          handleMove(x, y - 1);
-          break;
-
-        case "ArrowDown":
-        case "s":
-        case "S":
-          event.preventDefault();
-          handleMove(x, y + 1);
-          break;
-
-        case "ArrowLeft":
-        case "a":
-        case "A":
-          event.preventDefault();
-          handleMove(x - 1, y);
-          break;
-
-        case "ArrowRight":
-        case "d":
-        case "D":
-          event.preventDefault();
-          handleMove(x + 1, y);
-          break;
-      }
+      keysRef.current.delete(key);
     };
 
     window.addEventListener(
@@ -859,91 +744,26 @@ const Arena = ({
       handleKeyDown
     );
 
+    window.addEventListener(
+      "keyup",
+      handleKeyUp
+    );
+
     return () => {
       window.removeEventListener(
         "keydown",
         handleKeyDown
       );
+
+      window.removeEventListener(
+        "keyup",
+        handleKeyUp
+      );
     };
-  }, [currentUser]);
+  }, []);
 
   /* =======================================================
-     CHAT
-  ======================================================= */
-
-  const sendChatMessage = () => {
-    const text =
-      chatDraft.trim();
-
-    if (
-      !text ||
-      !currentUser
-    ) {
-      return;
-    }
-
-    /*
-     * Show immediately for ourselves.
-     */
-    setChatLog(
-      (previous) => [
-        ...previous,
-        {
-          id:
-            chatIdRef.current++,
-          name: username,
-          text,
-        },
-      ]
-    );
-
-    /*
-     * Show bubble above avatar.
-     */
-    setBubble(text);
-
-    if (bubbleTimeout.current) {
-      clearTimeout(
-        bubbleTimeout.current
-      );
-    }
-
-    bubbleTimeout.current =
-      setTimeout(() => {
-        setBubble(null);
-      }, 3200);
-
-    /*
-     * Broadcast to server.
-     */
-    const ws =
-      wsRef.current;
-
-    if (
-      ws &&
-      ws.readyState ===
-        WebSocket.OPEN
-    ) {
-      ws.send(
-        JSON.stringify({
-          type: "chat",
-
-          payload: {
-            userId:
-              currentUser.userId,
-            username,
-            name: username,
-            text,
-          },
-        })
-      );
-    }
-
-    setChatDraft("");
-  };
-
-  /* =======================================================
-     CANVAS RENDER
+     DRAWING
   ======================================================= */
 
   useEffect(() => {
@@ -961,1189 +781,1018 @@ const Arena = ({
       return;
     }
 
-    ctx.clearRect(
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+    const resizeCanvas = () => {
+      const rect =
+        canvas.getBoundingClientRect();
 
-    drawFloor(
-      ctx,
-      canvas.width,
-      canvas.height
-    );
+      canvas.width =
+        rect.width *
+        window.devicePixelRatio;
 
-    drawProps(ctx);
+      canvas.height =
+        rect.height *
+        window.devicePixelRatio;
 
-    drawZoneLabels(ctx);
-
-    /*
-     * Other players.
-     */
-    users.forEach(
-      (user) => {
-        const px =
-          user.x *
-            TILE_SIZE +
-          TILE_SIZE / 2;
-
-        const py =
-          user.y *
-            TILE_SIZE +
-          TILE_SIZE / 2;
-
-        const playerName =
-          user.username ||
-          `Player ${user.userId.slice(
-            0,
-            6
-          )}`;
-
-        drawPlayer(
-          ctx,
-          px,
-          py,
-          colorForId(
-            user.userId
-          ),
-          playerName
-        );
-      }
-    );
-
-    /*
-     * Current player.
-     */
-    if (currentUser) {
-      const px =
-        currentUser.x *
-          TILE_SIZE +
-        TILE_SIZE / 2;
-
-      const py =
-        currentUser.y *
-          TILE_SIZE +
-        TILE_SIZE / 2;
-
-      drawPlayer(
-        ctx,
-        px,
-        py,
-        "#d4c04a",
-        username,
-        bubble
+      ctx.setTransform(
+        window.devicePixelRatio,
+        0,
+        0,
+        window.devicePixelRatio,
+        0,
+        0
       );
-    }
-  }, [
-    currentUser,
-    users,
-    bubble,
-    username,
-  ]);
+    };
+
+    resizeCanvas();
+
+    window.addEventListener(
+      "resize",
+      resizeCanvas
+    );
+
+    return () => {
+      window.removeEventListener(
+        "resize",
+        resizeCanvas
+      );
+    };
+  }, []);
 
   /* =======================================================
-     DRAW FLOOR
+     GAME LOOP
   ======================================================= */
 
-  const t = (n: number) =>
-    n * TILE_SIZE;
+  useEffect(() => {
+    const canvas =
+      canvasRef.current;
 
-  const drawFloor = (
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    height: number
-  ) => {
-    /*
-     * Base floor.
-     */
-    for (
-      let y = 0;
-      y < height;
-      y += TILE_SIZE
-    ) {
+    if (!canvas) {
+      return;
+    }
+
+    const ctx =
+      canvas.getContext("2d");
+
+    if (!ctx) {
+      return;
+    }
+
+    const draw = () => {
+      const rect =
+        canvas.getBoundingClientRect();
+
+      const width =
+        rect.width;
+
+      const height =
+        rect.height;
+
+      ctx.clearRect(
+        0,
+        0,
+        width,
+        height
+      );
+
+      /*
+       * World background
+       */
+      ctx.fillStyle =
+        "#102f2d";
+
+      ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+      );
+
+      /*
+       * Grid
+       */
       for (
         let x = 0;
         x < width;
         x += TILE_SIZE
       ) {
-        const dark =
-          (x / TILE_SIZE +
-            y / TILE_SIZE) %
-            2 ===
-          0;
-
-        ctx.fillStyle = dark
-          ? "#2f8f7f"
-          : "#297a6c";
-
-        ctx.fillRect(
-          x,
-          y,
-          TILE_SIZE,
-          TILE_SIZE
-        );
-      }
-    }
-
-    /*
-     * Back room.
-     */
-    ctx.fillStyle =
-      "#7a3c33";
-
-    ctx.fillRect(
-      t(BACK_ROOM.x),
-      t(BACK_ROOM.y),
-      t(BACK_ROOM.w),
-      t(BACK_ROOM.h)
-    );
-
-    /*
-     * Side rooms.
-     */
-    [LEFT_ROOM, RIGHT_ROOM].forEach(
-      (room) => {
-        ctx.fillStyle =
-          "#7a4a30";
-
-        ctx.fillRect(
-          t(room.x),
-          t(room.y),
-          t(room.w),
-          t(room.h)
-        );
-
-        ctx.strokeStyle =
-          "#6e4128";
-
-        ctx.lineWidth = 1;
-
         for (
-          let x = t(room.x);
-          x <
-          t(
-            room.x +
-              room.w
-          );
-          x += 14
+          let y = 0;
+          y < height;
+          y += TILE_SIZE
         ) {
-          ctx.beginPath();
+          const even =
+            ((x / TILE_SIZE) +
+              (y / TILE_SIZE)) %
+              2 ===
+            0;
 
-          ctx.moveTo(
+          ctx.fillStyle = even
+            ? "#31998c"
+            : "#2b8d82";
+
+          ctx.fillRect(
             x,
-            t(room.y)
+            y,
+            TILE_SIZE,
+            TILE_SIZE
           );
-
-          ctx.lineTo(
-            x,
-            t(
-              room.y +
-                room.h
-            )
-          );
-
-          ctx.stroke();
         }
       }
-    );
 
-    /*
-     * Stairs.
-     */
-    [STAIRS_LEFT, STAIRS_RIGHT].forEach(
-      (room) => {
+      /*
+       * Rooms
+       */
+      const drawRoom = (
+        room: Room,
+        color: string
+      ) => {
         ctx.fillStyle =
-          "#5c3620";
+          color;
 
         ctx.fillRect(
-          t(room.x),
-          t(room.y),
-          t(room.w),
-          t(room.h)
+          room.x *
+            TILE_SIZE,
+          room.y *
+            TILE_SIZE,
+          room.w *
+            TILE_SIZE,
+          room.h *
+            TILE_SIZE
         );
+      };
 
-        ctx.strokeStyle =
-          "#3d281a";
+      drawRoom(
+        BACK_ROOM,
+        "#704333"
+      );
 
-        ctx.lineWidth = 2;
+      drawRoom(
+        LEFT_ROOM,
+        "#704333"
+      );
 
-        for (
-          let i = -room.h;
-          i < room.w;
-          i++
-        ) {
-          ctx.beginPath();
+      drawRoom(
+        RIGHT_ROOM,
+        "#704333"
+      );
 
-          ctx.moveTo(
-            t(room.x) +
-              i * TILE_SIZE,
-            t(room.y)
-          );
+      /*
+       * Props
+       */
+      PROPS.forEach(
+        (prop) => {
+          const x =
+            prop.x *
+            TILE_SIZE;
 
-          ctx.lineTo(
-            t(room.x) +
-              (i +
-                room.h) *
+          const y =
+            prop.y *
+            TILE_SIZE;
+
+          if (
+            prop.type ===
+            "kiosk"
+          ) {
+            ctx.fillStyle =
+              prop.color;
+
+            ctx.fillRect(
+              x,
+              y,
+              prop.w *
                 TILE_SIZE,
-            t(
-              room.y +
-                room.h
-            )
-          );
-
-          ctx.stroke();
-        }
-      }
-    );
-  };
-
-  /* =======================================================
-     DRAW PROPS
-  ======================================================= */
-
-  const drawProps = (
-    ctx: CanvasRenderingContext2D
-  ) => {
-    PROPS.forEach(
-      (p) => {
-        switch (p.type) {
-          case "door": {
-            ctx.fillStyle =
-              "#c94f3d";
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
-            );
-
-            ctx.fillStyle =
-              "#f2c14e";
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              6
-            );
-
-            break;
-          }
-
-          case "kiosk": {
-            ctx.fillStyle =
-              p.color;
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
+              prop.h *
+                TILE_SIZE
             );
 
             ctx.strokeStyle =
-              "#f5f1e6";
-
-            ctx.lineWidth = 2;
+              "#ffffff";
 
             ctx.strokeRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
             );
 
             ctx.fillStyle =
-              "#f5f1e6";
+              "#ffffff";
 
             ctx.font =
-              "700 11px Inter, Arial";
+              "bold 14px sans-serif";
 
             ctx.textAlign =
               "center";
 
             ctx.fillText(
-              p.label,
-              t(p.x) +
-                t(p.w) / 2,
-              t(p.y) +
-                t(p.h) / 2 +
-                4
+              prop.label,
+              x +
+                (prop.w *
+                  TILE_SIZE) /
+                  2,
+              y +
+                (prop.h *
+                  TILE_SIZE) /
+                  2
             );
-
-            break;
           }
 
-          case "bookshelf": {
+          if (
+            prop.type ===
+            "bookshelf"
+          ) {
             ctx.fillStyle =
-              "#4a2f1c";
+              "#c98942";
 
             ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
             );
 
-            const rows = 3;
-            const cols = 4;
-
-            const cellW =
-              t(p.w) / cols;
-
-            const cellH =
-              t(p.h) / rows;
-
-            const bookColors = [
-              "#c94f3d",
-              "#3b6fb3",
-              "#81b29a",
-              "#f2c14e",
+            const colors = [
+              "#c94b3b",
+              "#3d6fb3",
+              "#82a78d",
+              "#e5ba45",
             ];
 
             for (
-              let r = 0;
-              r < rows;
-              r++
+              let i = 0;
+              i < 4;
+              i++
             ) {
-              for (
-                let c = 0;
-                c < cols;
-                c++
-              ) {
-                ctx.fillStyle =
-                  bookColors[
-                    (r + c) %
-                      bookColors.length
-                  ];
+              ctx.fillStyle =
+                colors[i];
 
-                ctx.fillRect(
-                  t(p.x) +
-                    c *
-                      cellW +
-                    1,
-                  t(p.y) +
-                    r *
-                      cellH +
-                    1,
-                  cellW - 2,
-                  cellH - 2
-                );
-              }
+              ctx.fillRect(
+                x +
+                  4 +
+                  i *
+                    18,
+                y + 5,
+                14,
+                prop.h *
+                    TILE_SIZE -
+                  10
+              );
             }
-
-            break;
           }
 
-          case "plant": {
-            const cx =
-              t(p.x) +
-              TILE_SIZE / 2;
-
-            const cy =
-              t(p.y) +
-              TILE_SIZE / 2;
-
+          if (
+            prop.type ===
+            "plant"
+          ) {
             ctx.fillStyle =
-              "#5c3620";
+              "#8b5a32";
 
             ctx.fillRect(
-              cx - 8,
-              cy + 4,
-              16,
-              12
+              x + 12,
+              y + 25,
+              26,
+              25
             );
 
             ctx.fillStyle =
-              "#3d7a4a";
+              "#3d8f49";
 
             ctx.beginPath();
 
-            ctx.ellipse(
-              cx,
-              cy - 2,
-              14,
-              12,
-              0,
+            ctx.arc(
+              x + 25,
+              y + 20,
+              16,
               0,
               Math.PI * 2
             );
 
             ctx.fill();
-
-            break;
           }
 
-          case "table": {
+          if (
+            prop.type ===
+            "table"
+          ) {
             ctx.fillStyle =
-              "#c9a876";
+              "#c9a56e";
 
             ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
+            );
+          }
+
+          if (
+            prop.type ===
+            "sofa"
+          ) {
+            ctx.fillStyle =
+              "#b34c3c";
+
+            ctx.fillRect(
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
+            );
+          }
+
+          if (
+            prop.type ===
+            "rug"
+          ) {
+            ctx.fillStyle =
+              "#d9b84a";
+
+            ctx.fillRect(
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
+            );
+          }
+
+          if (
+            prop.type ===
+            "painting"
+          ) {
+            ctx.fillStyle =
+              "#d3c7a4";
+
+            ctx.fillRect(
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
             );
 
             ctx.strokeStyle =
-              "#8a6a44";
+              "#b3453b";
 
-            ctx.lineWidth = 2;
-
-            ctx.strokeRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
-            );
-
-            break;
-          }
-
-          case "sofa": {
-            ctx.fillStyle =
-              "#d4a94a";
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
-            );
-
-            ctx.fillStyle =
-              "#b8902f";
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y) +
-                t(p.h) -
-                6,
-              t(p.w),
-              6
-            );
-
-            break;
-          }
-
-          case "rug": {
-            ctx.fillStyle =
-              "#b5432f";
-
-            ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
-            );
-
-            ctx.strokeStyle =
-              "#8a2f20";
-
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 4;
 
             ctx.strokeRect(
-              t(p.x) + 2,
-              t(p.y) + 2,
-              t(p.w) - 4,
-              t(p.h) - 4
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
             );
-
-            break;
           }
 
-          case "painting": {
+          if (
+            prop.type ===
+            "door"
+          ) {
             ctx.fillStyle =
-              "#e8dfc8";
+              "#d8b34c";
 
             ctx.fillRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
+              x,
+              y,
+              prop.w *
+                TILE_SIZE,
+              prop.h *
+                TILE_SIZE
             );
-
-            ctx.strokeStyle =
-              "#6e4128";
-
-            ctx.lineWidth = 3;
-
-            ctx.strokeRect(
-              t(p.x),
-              t(p.y),
-              t(p.w),
-              t(p.h)
-            );
-
-            break;
           }
         }
-      }
-    );
-  };
-
-  /* =======================================================
-     ZONE LABELS
-  ======================================================= */
-
-  const drawZoneLabels = (
-    ctx: CanvasRenderingContext2D
-  ) => {
-    ctx.textAlign =
-      "center";
-
-    ctx.fillStyle =
-      "#e8f5ef";
-
-    ctx.font =
-      "700 13px Inter, Arial";
-
-    ZONE_LABELS.forEach(
-      (zone) => {
-        const cx =
-          t(zone.x);
-
-        const cy =
-          t(zone.y);
-
-        ctx.fillText(
-          zone.arrow === "up"
-            ? "▲"
-            : "▼",
-          cx,
-          zone.arrow === "up"
-            ? cy - 14
-            : cy + 20
-        );
-
-        ctx.fillText(
-          zone.text,
-          cx,
-          cy
-        );
-      }
-    );
-  };
-
-  /* =======================================================
-     PLAYER
-  ======================================================= */
-
-  const drawPlayer = (
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    color: string,
-    label: string,
-    chatBubble?: string | null
-  ) => {
-    /*
-     * Glow.
-     */
-    ctx.save();
-
-    ctx.shadowColor =
-      color;
-
-    ctx.shadowBlur = 18;
-
-    ctx.beginPath();
-
-    ctx.fillStyle =
-      color;
-
-    ctx.arc(
-      x,
-      y,
-      15,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    ctx.restore();
-
-    /*
-     * Body.
-     */
-    ctx.beginPath();
-
-    ctx.fillStyle =
-      color;
-
-    ctx.arc(
-      x,
-      y,
-      13,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    /*
-     * Head.
-     */
-    ctx.beginPath();
-
-    ctx.fillStyle =
-      "#f4f4f5";
-
-    ctx.arc(
-      x,
-      y - 5,
-      5,
-      0,
-      Math.PI * 2
-    );
-
-    ctx.fill();
-
-    /*
-     * Name plate.
-     */
-    ctx.font =
-      "600 11px Inter, Arial";
-
-    ctx.textAlign =
-      "center";
-
-    const labelWidth =
-      ctx.measureText(
-        label
-      ).width + 16;
-
-    ctx.fillStyle =
-      "#0e1512dd";
-
-    ctx.fillRect(
-      x -
-        labelWidth / 2,
-      y + 20,
-      labelWidth,
-      17
-    );
-
-    ctx.fillStyle =
-      "#ffffff";
-
-    ctx.fillText(
-      label,
-      x,
-      y + 32
-    );
-
-    /*
-     * Chat bubble.
-     */
-    if (chatBubble) {
-      ctx.font =
-        "600 12px Inter, Arial";
-
-      const bubbleWidth =
-        Math.min(
-          180,
-          ctx.measureText(
-            chatBubble
-          ).width + 24
-        );
-
-      const bubbleX =
-        x -
-        bubbleWidth / 2;
-
-      const bubbleY =
-        y - 48;
-
-      ctx.fillStyle =
-        "#fffdf7";
-
-      ctx.beginPath();
-
-      ctx.roundRect(
-        bubbleX,
-        bubbleY,
-        bubbleWidth,
-        28,
-        8
       );
 
-      ctx.fill();
+      /*
+       * Remote players
+       */
+      users.forEach(
+        (user) => {
+          if (
+            currentUser &&
+            user.userId ===
+              currentUser.userId
+          ) {
+            return;
+          }
 
-      ctx.fillStyle =
-        "#1e1508";
+          const x =
+            user.x *
+              TILE_SIZE +
+            TILE_SIZE / 2;
 
-      ctx.fillText(
-        chatBubble,
-        x,
-        bubbleY + 18,
-        bubbleWidth - 10
+          const y =
+            user.y *
+              TILE_SIZE +
+            TILE_SIZE / 2;
+
+          ctx.fillStyle =
+            "#8b5cf6";
+
+          ctx.beginPath();
+
+          ctx.arc(
+            x,
+            y,
+            14,
+            0,
+            Math.PI * 2
+          );
+
+          ctx.fill();
+
+          ctx.fillStyle =
+            "#ffffff";
+
+          ctx.font =
+            "12px sans-serif";
+
+          ctx.textAlign =
+            "center";
+
+          ctx.fillText(
+            user.username ||
+              "Player",
+            x,
+            y - 22
+          );
+        }
       );
+
+      /*
+       * Current player
+       */
+      if (currentUser) {
+        const x =
+          currentUser.x *
+            TILE_SIZE +
+          TILE_SIZE / 2;
+
+        const y =
+          currentUser.y *
+            TILE_SIZE +
+          TILE_SIZE / 2;
+
+        ctx.fillStyle =
+          "#22d3ee";
+
+        ctx.beginPath();
+
+        ctx.arc(
+          x,
+          y,
+          15,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fill();
+
+        ctx.strokeStyle =
+          "#ffffff";
+
+        ctx.lineWidth = 2;
+
+        ctx.stroke();
+
+        ctx.fillStyle =
+          "#ffffff";
+
+        ctx.font =
+          "bold 12px sans-serif";
+
+        ctx.textAlign =
+          "center";
+
+        ctx.fillText(
+          username,
+          x,
+          y - 24
+        );
+      }
+
+      animationRef.current =
+        requestAnimationFrame(
+          draw
+        );
+    };
+
+    draw();
+
+    return () => {
+      if (
+        animationRef.current
+      ) {
+        cancelAnimationFrame(
+          animationRef.current
+        );
+      }
+    };
+  }, [
+    users,
+    currentUser,
+    username,
+  ]);
+
+  /* =======================================================
+     MOVEMENT
+  ======================================================= */
+
+  useEffect(() => {
+    const interval =
+      setInterval(() => {
+        const ws =
+          wsRef.current;
+
+        if (
+          !ws ||
+          ws.readyState !==
+            WebSocket.OPEN ||
+          !currentUser
+        ) {
+          return;
+        }
+
+        const keys =
+          keysRef.current;
+
+        let dx = 0;
+        let dy = 0;
+
+        if (
+          keys.has("w") ||
+          keys.has("arrowup")
+        ) {
+          dy -= 1;
+        }
+
+        if (
+          keys.has("s") ||
+          keys.has("arrowdown")
+        ) {
+          dy += 1;
+        }
+
+        if (
+          keys.has("a") ||
+          keys.has("arrowleft")
+        ) {
+          dx -= 1;
+        }
+
+        if (
+          keys.has("d") ||
+          keys.has("arrowright")
+        ) {
+          dx += 1;
+        }
+
+        if (
+          dx === 0 &&
+          dy === 0
+        ) {
+          return;
+        }
+
+        const newX =
+          currentUser.x + dx;
+
+        const newY =
+          currentUser.y + dy;
+
+        if (
+          newX < 0 ||
+          newX > 39 ||
+          newY < 0 ||
+          newY > 23
+        ) {
+          return;
+        }
+
+        ws.send(
+          JSON.stringify({
+            type: "move",
+            payload: {
+              x: newX,
+              y: newY,
+            },
+          })
+        );
+
+        setCurrentUser(
+          (prev) =>
+            prev
+              ? {
+                  ...prev,
+                  x: newX,
+                  y: newY,
+                }
+              : prev
+        );
+      }, 100);
+
+    return () => {
+      clearInterval(
+        interval
+      );
+    };
+  }, [
+    currentUser,
+  ]);
+
+  /* =======================================================
+     LOGOUT
+  ======================================================= */
+
+  const handleLogout = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
     }
+
+    localStorage.removeItem(
+      "token"
+    );
+
+    localStorage.removeItem(
+      "username"
+    );
+
+    onLogout();
   };
 
   /* =======================================================
-     UI
+     RENDER
   ======================================================= */
 
   return (
-    <div className="min-h-screen w-full bg-[#080c0b] text-white overflow-hidden">
-      {/* HEADER */}
-
-      <header className="h-16 w-full border-b border-white/10 bg-[#0c1210]/95 backdrop-blur-xl flex items-center justify-between px-4 md:px-6">
+    <div className="min-h-screen bg-[#070b0a] text-white">
+      <header className="flex items-center justify-between border-b border-white/10 bg-[#08100f] px-6 py-4">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-violet-500/20">
-            <Gamepad2 size={20} />
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-cyan-400">
+            <Gamepad2
+              size={24}
+            />
           </div>
 
           <div>
-            <h1 className="text-sm md:text-base font-semibold">
+            <h1 className="text-lg font-bold">
               MetaVerse
             </h1>
 
-            <p className="text-[10px] md:text-xs text-zinc-500">
+            <p className="text-xs text-white/50">
               Multiplayer virtual arena
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
+        <div className="flex items-center gap-4">
+          <div
+            className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm ${
+              connected
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                : "border-red-500/30 bg-red-500/10 text-red-400"
+            }`}
+          >
             {connected ? (
-              <Wifi
-                size={13}
-                className="text-emerald-400"
-              />
+              <>
+                <Wifi size={15} />
+                Connected
+              </>
             ) : (
-              <WifiOff
-                size={13}
-                className="text-red-400"
-              />
+              <>
+                <WifiOff size={15} />
+                Disconnected
+              </>
             )}
-
-            <span
-              className={`text-xs ${
-                connected
-                  ? "text-emerald-400"
-                  : "text-red-400"
-              }`}
-            >
-              {connected
-                ? "Connected"
-                : "Disconnected"}
-            </span>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5">
-            <div className="h-6 w-6 rounded-full bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-[10px] font-bold">
+          <div className="flex items-center gap-3 rounded-full border border-white/10 px-4 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-cyan-400 text-sm font-bold">
               {avatarLetter}
             </div>
 
-            <span className="hidden md:block text-xs text-zinc-300">
+            <span className="text-sm">
               {username}
             </span>
           </div>
 
           <button
-            onClick={onLogout}
-            className="h-9 w-9 rounded-lg border border-white/10 bg-white/[0.03] hover:bg-red-500/10 hover:text-red-400 flex items-center justify-center transition"
-            title="Log out"
+            onClick={
+              handleLogout
+            }
+            className="rounded-lg border border-white/10 p-3 text-white/70 transition hover:bg-white/5 hover:text-white"
           >
-            <LogOut size={15} />
+            <LogOut
+              size={18}
+            />
           </button>
         </div>
       </header>
 
-      {/* MAIN */}
-
-      <main className="h-[calc(100vh-4rem)] w-full flex flex-col lg:flex-row">
-        {/* WORLD */}
-
-        <section className="relative flex-1 min-w-0 min-h-0 bg-[#0b100e] overflow-hidden">
-          {/* World info */}
-
-          <div className="absolute z-20 top-4 left-4 flex items-center gap-2">
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1210]/85 backdrop-blur-xl px-3 py-2 shadow-xl">
-              <MapPin
-                size={14}
-                className="text-cyan-400"
-              />
-
-              <span className="text-xs font-medium text-zinc-200">
-                Arena
-              </span>
-            </div>
-
-            <div className="hidden sm:flex items-center rounded-xl border border-white/10 bg-[#0c1210]/85 backdrop-blur-xl px-3 py-2">
-              <span className="text-[11px] text-zinc-500 mr-1">
-                Space
-              </span>
-
-              <span className="text-[11px] text-zinc-300 font-mono">
-                {SPACE_ID.slice(0, 12)}
-              </span>
-            </div>
-          </div>
-
-          {/* Error */}
+      <main className="grid min-h-[calc(100vh-81px)] grid-cols-[1fr_360px]">
+        <section className="relative overflow-hidden">
+          <canvas
+            ref={canvasRef}
+            className="h-full min-h-[700px] w-full"
+          />
 
           {error && (
-            <div className="absolute z-30 top-20 left-1/2 -translate-x-1/2">
-              <div className="rounded-xl border border-red-500/20 bg-red-500/10 backdrop-blur-xl px-4 py-3 text-xs text-red-300 shadow-xl">
-                {error}
-              </div>
+            <div className="absolute left-1/2 top-8 -translate-x-1/2 rounded-xl border border-red-400/20 bg-red-500/20 px-6 py-3 text-sm text-red-300 backdrop-blur">
+              {error}
             </div>
           )}
 
-          {/* Canvas */}
+          {chatBubble && (
+            <div className="absolute left-1/2 top-24 -translate-x-1/2 rounded-xl border border-white/10 bg-black/70 px-5 py-3 text-sm backdrop-blur">
+              <strong>
+                {chatBubble.username}
+              </strong>
+              :{" "}
+              {chatBubble.text}
+            </div>
+          )}
 
-          <div className="absolute inset-0 overflow-auto">
-            <canvas
-              ref={canvasRef}
-              width={2000}
-              height={1200}
-              className="block max-w-none"
-            />
-          </div>
-
-          {/* CHAT */}
-
-          <div className="absolute z-30 bottom-4 left-4 w-[min(340px,calc(100%-2rem))]">
-            {chatLog.length > 0 && (
-              <div className="mb-2 max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                {chatLog
-                  .slice(-5)
-                  .map((message) => (
-                    <div
-                      key={message.id}
-                      className="w-fit max-w-full rounded-xl border border-white/10 bg-[#0c1210]/90 backdrop-blur-xl px-3 py-1.5"
-                    >
-                      <span className="text-[11px] font-semibold text-cyan-300">
-                        {message.name}
-                      </span>
-
-                      <span className="ml-2 text-[11px] text-zinc-300 break-words">
-                        {message.text}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-[#0c1210]/95 backdrop-blur-xl p-1.5 shadow-2xl">
-              <MessageCircle
-                size={15}
-                className="ml-2 text-zinc-500"
+          <div className="absolute left-5 top-5 flex items-center gap-3">
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/50 px-4 py-3 backdrop-blur">
+              <MapPin
+                size={16}
               />
 
-              <input
-                value={chatDraft}
-                onChange={(event) =>
-                  setChatDraft(
-                    event.target.value
-                  )
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.key === "Enter"
-                  ) {
-                    sendChatMessage();
-                  }
-                }}
-                placeholder="Talk to everyone..."
-                className="flex-1 min-w-0 bg-transparent outline-none border-none text-xs text-white placeholder:text-zinc-600 px-1 py-2"
-              />
+              Arena
+            </div>
 
-              <button
-                onClick={
-                  sendChatMessage
-                }
-                disabled={
-                  !chatDraft.trim() ||
-                  !currentUser
-                }
-                className="h-8 w-8 shrink-0 rounded-xl bg-white text-black flex items-center justify-center hover:bg-zinc-200 disabled:opacity-30 transition"
-              >
-                <Send size={13} />
-              </button>
+            <div className="rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-xs text-white/60 backdrop-blur">
+              Space {SPACE_ID}
             </div>
           </div>
 
-          {/* Controls */}
-
-          <div className="absolute z-20 bottom-4 right-4 hidden md:flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1210]/85 backdrop-blur-xl px-3 py-2">
+          <div className="absolute bottom-5 left-5 flex items-center gap-3 rounded-xl border border-white/10 bg-black/60 px-4 py-3 backdrop-blur">
             <Keyboard
-              size={13}
-              className="text-zinc-500"
+              size={17}
             />
 
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-sm text-white/60">
               WASD / Arrow Keys
             </span>
           </div>
         </section>
 
-        {/* SIDEBAR */}
-
-        <aside className="w-full lg:w-[320px] xl:w-[350px] shrink-0 border-t lg:border-t-0 lg:border-l border-white/10 bg-[#0c1210] overflow-y-auto">
-          <div className="p-4 space-y-3">
-            {/* CHARACTER */}
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.025] overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/10">
+        <aside className="border-l border-white/10 bg-[#0b1211] p-5">
+          <div className="space-y-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[0.02]">
+              <div className="border-b border-white/10 p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-xs font-semibold">
+                    <h2 className="font-semibold">
                       Your character
                     </h2>
 
-                    <p className="text-[10px] text-zinc-600 mt-0.5">
+                    <p className="mt-1 text-xs text-white/40">
                       Current player
                     </p>
                   </div>
 
                   <div
-                    className={`h-2 w-2 rounded-full ${
+                    className={`h-2.5 w-2.5 rounded-full ${
                       connected
-                        ? "bg-emerald-400 shadow-lg shadow-emerald-400/50"
+                        ? "bg-emerald-400"
                         : "bg-red-400"
                     }`}
                   />
                 </div>
               </div>
 
-              <div className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-lg font-bold shadow-lg">
+              <div className="p-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-cyan-400 text-xl font-bold">
                     {avatarLetter}
                   </div>
 
-                  <div className="min-w-0">
-                    <div className="font-semibold text-sm truncate">
+                  <div>
+                    <div className="font-semibold">
                       {username}
                     </div>
 
-                    <div className="text-[10px] text-zinc-600 mt-1">
-                      {currentUser
-                        ? `Position ${currentUser.x}, ${currentUser.y}`
+                    <div className="text-xs text-white/40">
+                      {connected
+                        ? "Connected"
                         : "Joining arena..."}
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
 
-            {/* PLAYERS */}
+            <section className="rounded-2xl border border-white/10 bg-white/[0.02]">
+              <div className="flex items-center justify-between border-b border-white/10 p-5">
+                <div className="flex items-center gap-2">
+                  <Users
+                    size={17}
+                  />
 
-            <div className="rounded-2xl border border-white/10 bg-white/[0.025] overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/10">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Users
-                      size={14}
-                      className="text-violet-400"
-                    />
-
-                    <h2 className="text-xs font-semibold">
-                      Players
-                    </h2>
-                  </div>
-
-                  <span className="text-[10px] text-zinc-600">
-                    {users.size +
-                      (currentUser
-                        ? 1
-                        : 0)}{" "}
-                    online
-                  </span>
+                  <h2 className="font-semibold">
+                    Players
+                  </h2>
                 </div>
+
+                <span className="text-xs text-white/40">
+                  {users.length} online
+                </span>
               </div>
 
-              <div className="p-3">
-                <div className="space-y-1">
-                  {/* CURRENT USER */}
-
-                  <div className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-3 py-2">
-                    <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-violet-500 to-cyan-400 flex items-center justify-center text-[9px] font-bold">
+              <div className="max-h-64 space-y-2 overflow-y-auto p-4">
+                {currentUser && (
+                  <div className="flex items-center gap-3 rounded-xl bg-white/[0.04] p-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-cyan-400 text-sm font-bold">
                       {avatarLetter}
                     </div>
 
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium truncate">
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">
                         {username}
                       </div>
 
-                      <div className="text-[9px] text-emerald-400">
+                      <div className="text-xs text-emerald-400">
                         You
                       </div>
                     </div>
 
-                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    <div className="h-2 w-2 rounded-full bg-emerald-400" />
                   </div>
+                )}
 
-                  {/* OTHER USERS */}
-
-                  {Array.from(
-                    users.values()
-                  ).map((user) => {
-                    const name =
-                      user.username ||
-                      `Player ${user.userId.slice(
-                        0,
-                        6
-                      )}`;
-
-                    return (
+                {users
+                  .filter(
+                    (user) =>
+                      !currentUser ||
+                      user.userId !==
+                        currentUser.userId
+                  )
+                  .map(
+                    (user) => (
                       <div
-                        key={user.userId}
-                        className="flex items-center gap-3 rounded-xl px-3 py-2 hover:bg-white/[0.03] transition"
+                        key={
+                          user.userId
+                        }
+                        className="flex items-center gap-3 rounded-xl p-3"
                       >
-                        <div
-                          className="h-7 w-7 rounded-lg flex items-center justify-center text-[9px] font-bold"
-                          style={{
-                            background:
-                              colorForId(
-                                user.userId
-                              ),
-                          }}
-                        >
-                          {name
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/20 text-sm font-bold text-violet-300">
+                          {(
+                            user.username ||
+                            "P"
+                          )
                             .charAt(0)
                             .toUpperCase()}
                         </div>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs text-zinc-300 truncate">
-                            {name}
-                          </div>
-
-                          <div className="text-[9px] text-zinc-600">
-                            {user.x},{" "}
-                            {user.y}
-                          </div>
+                        <div className="flex-1 text-sm">
+                          {user.username ||
+                            "Player"}
                         </div>
 
-                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      </div>
-                    );
-                  })}
-
-                  {users.size === 0 && (
-                    <div className="py-5 text-center">
-                      <Users
-                        size={20}
-                        className="mx-auto text-zinc-700 mb-2"
-                      />
-
-                      <p className="text-[10px] text-zinc-600">
-                        You're alone in
-                        the arena.
-                      </p>
-
-                      <p className="text-[9px] text-zinc-700 mt-1">
-                        Invite a friend
-                        to join you.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* CONTROLS */}
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.025] overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/10">
-                <div className="flex items-center gap-2">
-                  <Keyboard
-                    size={14}
-                    className="text-cyan-400"
-                  />
-
-                  <h2 className="text-xs font-semibold">
-                    Controls
-                  </h2>
-                </div>
-
-                <p className="text-[10px] text-zinc-600 mt-1">
-                  Move around the world
-                </p>
-              </div>
-
-              <div className="p-4">
-                <div className="flex justify-center mb-2">
-                  <div className="h-8 w-8 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center text-xs font-semibold">
-                    W
-                  </div>
-                </div>
-
-                <div className="flex justify-center gap-1">
-                  {["A", "S", "D"].map(
-                    (key) => (
-                      <div
-                        key={key}
-                        className="h-8 w-8 rounded-lg border border-white/10 bg-white/[0.04] flex items-center justify-center text-xs font-semibold"
-                      >
-                        {key}
+                        <div className="h-2 w-2 rounded-full bg-emerald-400" />
                       </div>
                     )
                   )}
+
+                {users.length === 0 && (
+                  <div className="py-8 text-center text-sm text-white/30">
+                    <Users
+                      size={30}
+                      className="mx-auto mb-3 opacity-50"
+                    />
+
+                    You're alone in the arena.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-white/[0.02]">
+              <div className="border-b border-white/10 p-5">
+                <div className="flex items-center gap-2">
+                  <Keyboard
+                    size={17}
+                  />
+
+                  <div>
+                    <h2 className="font-semibold">
+                      Controls
+                    </h2>
+
+                    <p className="mt-1 text-xs text-white/40">
+                      Move around the world
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5">
+                <div className="mx-auto grid w-fit grid-cols-3 gap-2">
+                  <div />
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">
+                    W
+                  </div>
+
+                  <div />
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">
+                    A
+                  </div>
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">
+                    S
+                  </div>
+
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-sm">
+                    D
+                  </div>
                 </div>
 
-                <p className="text-center text-[9px] text-zinc-700 mt-3">
+                <p className="mt-4 text-center text-xs text-white/30">
                   Arrow keys work too
                 </p>
               </div>
-            </div>
+            </section>
 
-            {/* SESSION */}
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.025] p-4">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`h-8 w-8 rounded-xl flex items-center justify-center ${
-                    connected
-                      ? "bg-emerald-500/10"
-                      : "bg-red-500/10"
-                  }`}
-                >
-                  {connected ? (
-                    <Wifi
-                      size={14}
-                      className="text-emerald-400"
-                    />
-                  ) : (
-                    <WifiOff
-                      size={14}
-                      className="text-red-400"
-                    />
-                  )}
-                </div>
+            <section className="rounded-2xl border border-white/10 bg-white/[0.02]">
+              <div className="flex items-center gap-3 p-5">
+                <MessageCircle
+                  size={18}
+                />
 
                 <div>
-                  <div className="text-xs font-medium">
+                  <h2 className="font-semibold">
                     Multiplayer session
-                  </div>
+                  </h2>
 
-                  <div className="text-[9px] text-zinc-600 mt-0.5">
+                  <p className="mt-1 text-xs text-white/40">
                     {connected
-                      ? "Everything is synced"
+                      ? "Connected to game server"
                       : "Waiting for connection"}
-                  </div>
+                  </p>
                 </div>
               </div>
-            </div>
+            </section>
 
-            {/* LOGOUT */}
+            <section className="relative">
+              <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.02] p-3">
+                <input
+                  value={
+                    messageInput
+                  }
+                  onChange={(event) =>
+                    setMessageInput(
+                      event.target.value
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.key ===
+                      "Enter"
+                    ) {
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Talk to everyone..."
+                  className="flex-1 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-white/30"
+                />
+
+                <button
+                  onClick={
+                    sendMessage
+                  }
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500 transition hover:bg-violet-400"
+                >
+                  <Send
+                    size={17}
+                  />
+                </button>
+              </div>
+            </section>
 
             <button
-              onClick={onLogout}
-              className="w-full flex items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.025] hover:bg-red-500/10 hover:border-red-500/20 hover:text-red-400 px-4 py-3 text-xs text-zinc-400 transition"
+              onClick={
+                handleLogout
+              }
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 transition hover:bg-white/5 hover:text-white"
             >
-              <LogOut size={14} />
+              <LogOut
+                size={17}
+              />
 
               Log out of MetaVerse
             </button>
@@ -2152,6 +1801,4 @@ const Arena = ({
       </main>
     </div>
   );
-};
-
-export default Arena;
+}
