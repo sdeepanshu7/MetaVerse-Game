@@ -9,9 +9,10 @@ const app = express();
 
 app.use((req, res, next) => {
   const allowedOrigins = [
-    "http://localhost:5173",
-    "http://localhost:5174",
-  ];
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://meta-verse-game-frontend-ibvw-mfbc98d00-sdeepanshu7s-projects.vercel.app",
+];
 
   const origin = req.headers.origin;
 
